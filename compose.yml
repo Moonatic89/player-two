@@ -1,0 +1,27 @@
+services:
+  player2:
+    build: .
+    container_name: player2
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - player2_data:/app/data
+    networks:
+      - edge
+    mem_limit: 256m
+    cpus: 0.5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  player2_data:
+networks:
+  edge:
+    external: true
+    name: public-edge
