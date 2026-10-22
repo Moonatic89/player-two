@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createGame } from './game.mjs';
 import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { Readable } from 'node:stream';
@@ -7,6 +8,7 @@ const folder=env.DRIVE_FOLDER_ID||'1mpR9e_Zow1fUADXuoAeSPCeEhvppFuW7', demo=env.
 if(!env.ACCESS_TOKEN||!env.SESSION_SECRET||!env.ADMIN_TOKEN) throw Error('Configure ACCESS_TOKEN, SESSION_SECRET and ADMIN_TOKEN');
 const data=env.DATA_DIR||'./data', secure=origin.startsWith('https:');
 await mkdir(data,{recursive:true,mode:0o700});
+const game=createGame(`${data}/player2.sqlite`);
 let credentials={}; try{credentials=JSON.parse(await readFile(`${data}/google.json`,'utf8'));}catch{}
 let cachedToken, tokenExpiry=0;
 const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
@@ -36,7 +38,14 @@ const r=await fetch('https://oauth2.googleapis.com/token',{method:'POST',body:ne
 await writeFile(`${data}/google.tmp`,JSON.stringify({refresh_token:j.refresh_token}),{mode:0o600});await rename(`${data}/google.tmp`,`${data}/google.json`);credentials={refresh_token:j.refresh_token};cachedToken=null;res.setHeader('Set-Cookie',cookie('oauth','',0));return reply(res,200,'Google Drive collegato. Ora puoi aprire il link NFC.','text/plain');}
 if(!validSession(req))return reply(res,404,'Non trovato','text/plain');
 if(req.method==='POST'&&req.headers.origin!==origin)return reply(res,403,{error:'Richiesta non valida.'});
-if(req.method==='GET'&&['/','/app.js','/style.css'].includes(path)){const filename=path==='/'?'index.html':path.slice(1);return reply(res,200,await readFile(new URL('./public/'+filename,import.meta.url)),path==='/'?'text/html; charset=utf-8':path.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8');}
+const player=game.identify(cookies(req).p2player,req.method==='GET'&&path==='/');
+if(player.token)res.setHeader('Set-Cookie',cookie('p2player',player.token,365*86400));
+if(path==='/api/game'&&req.method==='GET')return reply(res,200,game.state(player.id));
+if(['/api/game/nickname','/api/game/draw','/api/game/finish'].includes(path)&&req.method==='POST'){
+let input;try{input=JSON.parse((await body(req,4096)).toString());}catch(e){if(e.status)throw e;return reply(res,400,{error:'Dati non validi.'});}
+if(!input||typeof input!=='object')return reply(res,400,{error:'Dati non validi.'});
+const result=path.endsWith('/nickname')?game.nickname(player.id,input.nickname):path.endsWith('/draw')?game.draw(player.id,input.difficulty):game.finish(player.id,input.attemptId,input.action);return reply(res,200,result);}
+if(req.method==='GET'&&['/','/app.js','/game.js','/style.css'].includes(path)){const filename=path==='/'?'index.html':path.slice(1);return reply(res,200,await readFile(new URL('./public/'+filename,import.meta.url)),path==='/'?'text/html; charset=utf-8':path.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8');}
 if(path==='/api/photos'&&req.method==='GET'){
 if(demo)return reply(res,200,{files:[],demo:true});
 const page=url.searchParams.get('page')||'';if(page.length>1000)return reply(res,400,{error:'Pagina non valida'});
@@ -48,7 +57,7 @@ let r;if(!match[2]&&meta.thumbnailLink){const thumb=new URL(meta.thumbnailLink);
 r ||= await drive(`files/${match[1]}?alt=media`);res.setHeader('Content-Type',r.headers.get('content-type')||meta.mimeType);if(match[2])res.setHeader('Content-Disposition',`attachment; filename="photo"; filename*=UTF-8''${encodeURIComponent(meta.name).replace(/'/g,'%27')}`);Readable.fromWeb(r.body).pipe(res);return;}
 if(path==='/api/upload'&&req.method==='POST'){
 if(demo)return reply(res,409,{error:'Questa è una preview: le foto non vengono salvate.'});
-const now=Date.now(),key=cookies(req).p2, prev=uploads.get(key)||{count:0,start:now};if(now-prev.start>3600000){prev.start=now;prev.count=0;}if(prev.count>=150)return reply(res,429,{error:'Troppi caricamenti. Riprova tra un’ora.'});prev.count++;uploads.set(key,prev);for(const[k,v]of uploads)if(now-v.start>3600000)uploads.delete(k);
+const now=Date.now(),key=player.id, prev=uploads.get(key)||{count:0,start:now};if(now-prev.start>3600000){prev.start=now;prev.count=0;}if(prev.count>=150)return reply(res,429,{error:'Troppi caricamenti. Riprova tra un’ora.'});prev.count++;uploads.set(key,prev);for(const[k,v]of uploads)if(now-v.start>3600000)uploads.delete(k);
 const bytes=await body(req,25*1024*1024),mime=imageType(bytes);if(!mime)return reply(res,415,{error:'Scegli una foto JPEG, PNG, WebP, GIF o HEIC.'});
 let name;try{name=decodeURIComponent(req.headers['x-file-name']||'foto.jpg');}catch{return reply(res,400,{error:'Nome non valido'});}name=name.replace(/[\x00-\x1f/\\]/g,'_').slice(0,180)||'foto.jpg';
 const boundary=randomBytes(24).toString('hex'), meta=JSON.stringify({name,parents:[folder]});const multipart=Buffer.concat([Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${mime}\r\n\r\n`),bytes,Buffer.from(`\r\n--${boundary}--\r\n`)]);const r=await drive('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name',{method:'POST',headers:{'Content-Type':`multipart/related; boundary=${boundary}`},body:multipart});return reply(res,201,await r.json());}

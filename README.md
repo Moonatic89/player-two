@@ -35,3 +35,14 @@ DNS: record A `player2` verso `217.160.191.251`. Non aggiungere un record AAAA s
 25 MB per immagine, caricamenti sequenziali, 150 caricamenti/ora per sessione, JPEG/PNG/WebP/GIF/HEIC con verifica della firma. HEIC viene conservato originale; anteprime Google quando disponibili, la visualizzazione dell'originale dipende dal browser. Paginazione a 60 foto. Nessuna cancellazione dal sito. Errori parziali riportano quali foto riprovare. Animazioni rispettano la preferenza di movimento ridotto.
 
 Prima di distribuire i chip, provare caricamento e download reali su iPhone e Android con Drive collegato. Il collegamento non funziona finché il proprietario non autorizza Google.
+
+## Gioco degli invitati
+Il database SQLite `data/player2.sqlite` conserva profili, accessi, tentativi ed EXP nel volume già persistente dell'app (insieme alle credenziali Drive, che non vengono sostituite dal deploy). Richiede Node >=22.13 per `node:sqlite`; Node 22 segnala ancora il modulo come sperimentale. Nessuna dipendenza esterna.
+
+Il cookie personale `p2player` è casuale a 256 bit, HttpOnly e Secure in HTTPS, dura un anno e sul database è conservato solo il suo hash. Identifica il browser, non una persona verificata: cambio di rete supportato, cancellazione dei cookie/incognito/nuovo dispositivo creano un nuovo profilo. Nessun fingerprint o IP conservato. Gli accessi al sito sono raggruppati per profilo in finestre di 30 minuti.
+
+60 missioni con nomi a tema in `quests.mjs`: 30 facili (20 EXP), 20 medie (40), 10 difficili (80). Nickname modificabile, nessuna classifica pubblica. Un livello ogni 100 EXP. Una quest attiva per profilo e una sola prenotazione globale della stessa quest; transazioni SQLite e indici unici proteggono dalle assegnazioni simultanee. Completamento e abbandono usano l'ID del tentativo e non sono ripetibili. Penalità del 25% con minimo zero. Quest completate e abbandonate non tornano mai al medesimo profilo, ma si liberano per gli altri. Dopo 12 ore la prenotazione scade senza penalità; le scadute possono essere riassegnate anche al medesimo profilo. La scadenza viene applicata alla prima lettura o azione successiva. Il diario mostra gli ultimi 30 tentativi conclusi, lo storico completo rimane nel DB.
+
+Il consenso delle persone coinvolte è incluso nelle missioni. La missione del "furto" cosplay è un prestito autorizzato e restituito subito. Conferma sulla fiducia, senza verifica della foto o moderazione.
+
+Backup del gioco: usare SQLite online backup / `VACUUM INTO` verso un percorso protetto e salvare anche `google.json` separatamente. Non copiare a caldo soltanto il file `.sqlite` ignorando il WAL. Nessun backup o token deve entrare nella repository. I test creano database temporanei senza toccare quelli del server.
