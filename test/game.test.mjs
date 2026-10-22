@@ -36,3 +36,13 @@ test('Migration keeps exactly 60 IDs, prior scores, active reward and completion
  db=new DatabaseSync(path);assert.equal(db.prepare('SELECT COUNT(*) AS n FROM quests').get().n,60);assert.equal(db.prepare("SELECT COUNT(*) AS n FROM quests WHERE difficulty='medium'").get().n,15);db.close();
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test('Reset requires a matching one-use confirmation and affects only the selected player',()=>{
+ const g=createGame(':memory:');try{const a=g.identify(),b=g.identify();g.nickname(a.id,'Da resettare');g.nickname(b.id,'Altro player');let q=g.draw(a.id,'easy').active;g.finish(a.id,q.attemptId,'complete',{id:'reset-photo',title:'Ricordo'});const active=g.draw(a.id,'hard').active;const other=g.draw(b.id,'medium').active;
+ const t=g.prepareReset(a.id,'owner-session');assert.equal(t.xp,30);assert.equal(g.state(a.id).xp,30);assert.throws(()=>g.resetProgress(a.id,t.confirmationToken,'Sbagliato','owner-session'));assert.throws(()=>g.resetProgress(a.id,t.confirmationToken,'Da resettare','other-session'));assert.throws(()=>g.resetProgress(b.id,t.confirmationToken,'Altro player','owner-session'));
+ g.resetProgress(a.id,t.confirmationToken,'Da resettare','owner-session');const s=g.state(a.id);assert.equal(s.xp,0);assert.equal(s.level,1);assert.equal(s.active,null);assert.equal(s.history.length,0);assert.equal(s.nickname,'Da resettare');assert.equal(g.identify(a.token).id,a.id);assert.equal(s.available.easy,30);assert.equal(g.state(b.id).active.attemptId,other.attemptId);assert.equal(g.state(b.id).available.hard,10);assert.ok(active);assert.throws(()=>g.resetProgress(a.id,t.confirmationToken,'Da resettare','owner-session'));
+ }finally{g.close();}
+});
+test('A reset confirmation becomes stale when the guest makes progress or changes nickname',()=>{
+ const g=createGame(':memory:');try{const a=g.identify();g.nickname(a.id,'Prima');let t=g.prepareReset(a.id,'owner');g.nickname(a.id,'Dopo');assert.throws(()=>g.resetProgress(a.id,t.confirmationToken,'Dopo','owner'));t=g.prepareReset(a.id,'owner');g.draw(a.id,'easy');assert.throws(()=>g.resetProgress(a.id,t.confirmationToken,'Dopo','owner'));assert.ok(g.state(a.id).active);}finally{g.close();}
+});

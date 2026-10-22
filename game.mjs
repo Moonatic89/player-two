@@ -11,6 +11,8 @@ export function createGame(filename){
  CREATE UNIQUE INDEX IF NOT EXISTS one_active_player ON attempts(player_id) WHERE status='active';
  CREATE UNIQUE INDEX IF NOT EXISTS one_active_quest ON attempts(quest_id) WHERE status='active';
  CREATE TABLE IF NOT EXISTS accesses(id INTEGER PRIMARY KEY,player_id INTEGER NOT NULL REFERENCES players(id),at INTEGER NOT NULL);
+ CREATE TABLE IF NOT EXISTS reset_tickets(token_hash TEXT PRIMARY KEY,player_id INTEGER NOT NULL REFERENCES players(id),owner_hash TEXT NOT NULL,fingerprint TEXT NOT NULL,expires_at INTEGER NOT NULL);
+ CREATE TABLE IF NOT EXISTS progress_resets(id INTEGER PRIMARY KEY,player_id INTEGER NOT NULL REFERENCES players(id),at INTEGER NOT NULL);
  CREATE INDEX IF NOT EXISTS player_history ON attempts(player_id,quest_id,status);`);
  // Snapshot rewards before recategorizing existing quests. Apply migration atomically.
  db.exec('BEGIN IMMEDIATE');
@@ -53,5 +55,29 @@ export function createGame(filename){
  (SELECT q.title FROM attempts a JOIN quests q ON q.id=a.quest_id WHERE a.player_id=p.id AND a.status='active') AS activeTitle
  FROM players p WHERE p.nickname!='' ORDER BY p.xp DESC,p.last_seen DESC,p.id`).all()};}
  function details(id,before=Number.MAX_SAFE_INTEGER){expire();const player=db.prepare('SELECT id,nickname,xp,created_at AS createdAt,last_seen AS lastSeen FROM players WHERE id=?').get(id);if(!player)fail('Invitato non trovato.',404);const attempts=db.prepare(`SELECT a.id,a.status,a.started_at AS startedAt,a.finished_at AS finishedAt,a.xp_delta AS xpDelta,q.title,q.description,q.difficulty,COALESCE(a.reward_xp,q.xp) AS xp,a.photo_id AS photoId,a.photo_title AS photoTitle,a.photo_bonus AS photoBonus FROM attempts a JOIN quests q ON q.id=a.quest_id WHERE a.player_id=? AND a.id<? ORDER BY a.id DESC LIMIT 51`).all(id,before);return {player,attempts:attempts.slice(0,50),nextBefore:attempts.length>50?attempts[49].id:null};}
- return {identify,state,nickname,draw,finish,photoTitles,overview,details,close:()=>db.close()};
+ function resetSnapshot(id){
+ const player=db.prepare('SELECT id,nickname,xp FROM players WHERE id=?').get(id);if(!player)fail('Invitato non trovato.',404);
+ const attempts=db.prepare('SELECT id,status,xp_delta,photo_id FROM attempts WHERE player_id=? ORDER BY id').all(id);
+ return {player,attempts,fingerprint:hash(JSON.stringify({player,attempts}))};
+ }
+ function prepareReset(id,ownerSession){return transaction(()=>{
+ db.prepare('DELETE FROM reset_tickets WHERE expires_at<?').run(Date.now());
+ const snapshot=resetSnapshot(id),token=randomBytes(32).toString('hex');
+ db.prepare('INSERT INTO reset_tickets(token_hash,player_id,owner_hash,fingerprint,expires_at) VALUES(?,?,?,?,?)').run(hash(token),id,hash(ownerSession),snapshot.fingerprint,Date.now()+5*60000);
+ return {confirmationToken:token,nickname:snapshot.player.nickname,xp:snapshot.player.xp,attempts:snapshot.attempts.length};
+ });}
+ function resetProgress(id,token,nickname,ownerSession){return transaction(()=>{
+ if(typeof token!=='string'||!/^[a-f0-9]{64}$/.test(token)||typeof nickname!=='string')fail('Conferma non valida.',400);
+ const ticket=db.prepare('SELECT * FROM reset_tickets WHERE token_hash=? AND player_id=? AND owner_hash=?').get(hash(token),id,hash(ownerSession));
+ if(!ticket||ticket.expires_at<Date.now())fail('La conferma è scaduta o già usata. Ricomincia il reset.');
+ const snapshot=resetSnapshot(id);
+ if(snapshot.fingerprint!==ticket.fingerprint)fail('I progressi o il nickname sono cambiati. Riapri il reset per confermare i dati aggiornati.');
+ if(nickname!==snapshot.player.nickname)fail('Il nickname inserito non corrisponde.',400);
+ db.prepare('DELETE FROM attempts WHERE player_id=?').run(id);
+ db.prepare('UPDATE players SET xp=0 WHERE id=?').run(id);
+ db.prepare('DELETE FROM reset_tickets WHERE player_id=?').run(id);
+ db.prepare('INSERT INTO progress_resets(player_id,at) VALUES(?,?)').run(id,Date.now());
+ return {ok:true,nickname:snapshot.player.nickname};
+ });}
+ return {identify,state,nickname,draw,finish,photoTitles,overview,details,prepareReset,resetProgress,close:()=>db.close()};
 }

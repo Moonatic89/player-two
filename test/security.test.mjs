@@ -50,3 +50,14 @@ test('Privacy and terms are public without opening the private app or creating p
  for(const path of ['/privacy','/termini','/legal/style.css']){const r=await fetch(base+path);assert.equal(r.status,200);assert.equal(r.headers.get('set-cookie'),null);assert.equal((await fetch(base+path,{method:'HEAD'})).status,200);assert.equal((await fetch(base+path,{method:'POST'})).status,405);}
  assert.equal((await fetch(base)).status,404);assert.equal((await fetch(base+'/api/game')).status,404);assert.equal((await fetch(base+'/api/photos')).status,404);assert.equal((await fetch(base+'/sposi')).status,404);assert.equal((await fetch(base+'/legal/../server.mjs')).status,404);
 });
+
+test('Owner-only reset is protected by origin and requires the second confirmation',async()=>{
+ const entry=await fetch(base+'/sposi/accesso/test-owners',{redirect:'manual'}),ownerCookie=entry.headers.get('set-cookie').split(';')[0];const headers={cookie:ownerCookie,origin:'http://localhost:3000','Content-Type':'application/json'};
+ const overview=await(await fetch(base+'/sposi/api/players',{headers})).json();const player=overview.players.find(p=>p.nickname==='Hero test');const path='/sposi/api/players/'+player.id+'/reset';
+ const post=(suffix,payload,h=headers)=>fetch(base+path+suffix,{method:'POST',headers:h,body:JSON.stringify(payload)});
+ assert.equal((await post('/prepare',{}, {...headers,cookie})).status,404);assert.equal((await post('/prepare',{}, {...headers,origin:'https://evil.example'})).status,403);assert.equal((await post('',{nickname:player.nickname})).status,400);
+ const prepare=await(await post('/prepare',{})).json();assert.equal(prepare.nickname,player.nickname);assert.equal((await post('',{confirmationToken:prepare.confirmationToken,nickname:'wrong'})).status,400);
+ assert.equal((await post('',{confirmationToken:prepare.confirmationToken,nickname:player.nickname})).status,200);
+ assert.equal((await post('',{confirmationToken:prepare.confirmationToken,nickname:player.nickname})).status,409);
+ const after=await(await fetch(base+'/sposi/api/players/'+player.id,{headers})).json();assert.equal(after.player.xp,0);assert.equal(after.player.nickname,player.nickname);assert.deepEqual(after.attempts,[]);
+});

@@ -50,6 +50,15 @@ if(path.startsWith('/sposi/accesso/')&&req.method==='GET'){
 if(path==='/sposi'||path.startsWith('/sposi/')){
  const [expires,signature]=(cookies(req).p2owners||'').split('.');
  if(!env.OWNER_TOKEN||Number(expires)<=Date.now()||!Number.isFinite(Number(expires))||!equal(signature,sign('owners:'+expires+env.OWNER_TOKEN)))return reply(res,404,'Non trovato','text/plain');
+ const resetRoute=path.match(/^\/sposi\/api\/players\/(\d+)\/reset(\/prepare)?$/);
+ if(resetRoute&&req.method==='POST'){
+  if(req.headers.origin!==origin)return reply(res,403,{error:'Richiesta non valida.'});
+  const id=Number(resetRoute[1]);if(!Number.isSafeInteger(id)||id<1)return reply(res,400,{error:'Invitato non valido.'});
+  let input;try{input=JSON.parse((await body(req,4096)).toString());}catch(e){if(e.status)throw e;return reply(res,400,{error:'Dati non validi.'});}
+  if(!input||typeof input!=='object')return reply(res,400,{error:'Dati non validi.'});
+  const session=cookies(req).p2owners;
+  return reply(res,200,resetRoute[2]?game.prepareReset(id,session):game.resetProgress(id,input.confirmationToken,input.nickname,session));
+ }
  if(req.method!=='GET')return reply(res,405,'Metodo non consentito','text/plain');
  if(path==='/sposi/drive/connect')return startGoogle(res);
  const ownerPhoto=path.match(/^\/sposi\/photos\/([a-zA-Z0-9_-]{1,200})$/);if(ownerPhoto)return await sendPhoto(res,ownerPhoto[1]);

@@ -50,7 +50,7 @@ Backup del gioco: usare SQLite online backup / `VACUUM INTO` verso un percorso p
 ## Cabina degli sposi
 Generare `OWNER_TOKEN` casuale (32 byte) separato dai token invitati e Google. Aprire `/sposi/accesso/OWNER_TOKEN`: crea un cookie HttpOnly dedicato di 30 giorni e reindirizza a `/sposi` senza chiave nell'indirizzo. Il link è condivisibile solo tra gli sposi; cambiarne il token revoca anche le sessioni esistenti. La pagina e tutte le sue risorse/API richiedono questo cookie, il token invitati non è sufficiente.
 
-Riepilogo con giocatori, quest attive, completate e abbandonate; browser totali distinti (non persone verificate). Elenco dei nickname per EXP con ultimo accesso, visite raggruppate in finestre di 30 minuti e quest attuale. Ricerca per nickname e diario completo di ciascun profilo, paginato a 50 tentativi. Vista in sola lettura, riepilogo aggiornato ogni 30 secondi; il diario si ricarica riaprendolo. Non espone cookie, hash o credenziali Google.
+Riepilogo con giocatori, quest attive, completate e abbandonate; browser totali distinti (non persone verificate). Elenco dei nickname per EXP con ultimo accesso, visite raggruppate in finestre di 30 minuti e quest attuale. Ricerca per nickname e diario completo di ciascun profilo, paginato a 50 tentativi. Riepilogo aggiornato ogni 30 secondi; il diario si ricarica riaprendolo. Non espone cookie, hash o credenziali Google.
 
 
 ## Foto del successo
@@ -64,3 +64,9 @@ Nel pannello sposi: Collegamento Google Drive → Ricollega Google Drive. Se Goo
 
 ## Pagine informative pubbliche
 `/privacy` e `/termini` sono accessibili senza token, insieme al solo foglio di stile `/legal/style.css`, e non creano profili o cookie. Galleria, gioco e cabina sposi rimangono privati. I testi descrivono il funzionamento reale, l'accesso Google Drive ampio ma limitato dal codice alla cartella, cookie, accessi, foto con metadati, conservazione senza cancellazione automatica e richieste manuali agli organizzatori. Il contatto attuale è «gli sposi tramite i recapiti dell'invito»; personalizzare questa indicazione con i dati che gli organizzatori scelgono di pubblicare. Le pagine non attestano automaticamente l'approvazione OAuth da parte di Google.
+
+
+## Reset progressi dalla cabina sposi
+Nel diario di un invitato: «Azzera progressi di questo invitato», prima conferma «Continua», poi digitazione esatta del nickname e «Azzera definitivamente». Il server rilascia una conferma monouso valida 5 minuti, legata al profilo, alla sessione degli sposi e ai progressi correnti. Cambiamenti di nickname o tentativi prima della conferma invalidano il reset. POST con controllo Origin obbligatorio; il token invitati non può eseguirlo.
+
+Il reset transazionale porta EXP a zero (livello 1), elimina tutti i tentativi e libera le quest attive; rimuove esclusioni e collegamenti alle foto/bonus dal diario, quindi le missioni sono rigiocabili. Mantiene profilo, nickname, cookie e registro accessi. Non chiama Drive e non elimina alcuna immagine. Registra solo ID profilo e data dell'operazione in `progress_resets`, senza conservare una copia dello storico cancellato. I backup amministrativi preesistenti possono ancora contenere lo storico precedente. Non eseguire reset reali come test di deploy.
