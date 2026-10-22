@@ -37,6 +37,12 @@ const uploads=new Map();
 export const server=http.createServer(async(req,res)=>{res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");try{
 const url=new URL(req.url,origin), path=url.pathname;
 if(path==='/health')return reply(res,200,{ok:true});
+const legalFiles=new Map([['/privacy',['privacy.html','text/html; charset=utf-8']],['/termini',['termini.html','text/html; charset=utf-8']],['/legal/style.css',['style.css','text/css; charset=utf-8']]]);
+if(legalFiles.has(path)){
+ if(!['GET','HEAD'].includes(req.method))return reply(res,405,'Metodo non consentito','text/plain');
+ const [file,type]=legalFiles.get(path);return reply(res,200,await readFile(new URL('./public/legal/'+file,import.meta.url)),type);
+}
+
 if(path.startsWith('/sposi/accesso/')&&req.method==='GET'){
  if(!env.OWNER_TOKEN||!equal(path.slice('/sposi/accesso/'.length),env.OWNER_TOKEN))return reply(res,404,'Non trovato','text/plain');
  const expires=String(Date.now()+30*86400000);return redirect(res,'/sposi',cookie('p2owners',expires+'.'+sign('owners:'+expires+env.OWNER_TOKEN),30*86400));

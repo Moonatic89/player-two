@@ -45,3 +45,8 @@ test('Photo bonus validates Drive folder and leaves the quest active on errors',
  q=(await(await post('draw',{difficulty:'easy'})).json()).active;assert.equal((await post('finish',{attemptId:q.attemptId,action:'complete',photoId:'evidence'})).status,409);j=await(await post('finish',{attemptId:q.attemptId,action:'complete'})).json();assert.equal(j.xp,260);
  }finally{globalThis.fetch=original;}
 });
+
+test('Privacy and terms are public without opening the private app or creating player cookies',async()=>{
+ for(const path of ['/privacy','/termini','/legal/style.css']){const r=await fetch(base+path);assert.equal(r.status,200);assert.equal(r.headers.get('set-cookie'),null);assert.equal((await fetch(base+path,{method:'HEAD'})).status,200);assert.equal((await fetch(base+path,{method:'POST'})).status,405);}
+ assert.equal((await fetch(base)).status,404);assert.equal((await fetch(base+'/api/game')).status,404);assert.equal((await fetch(base+'/api/photos')).status,404);assert.equal((await fetch(base+'/sposi')).status,404);assert.equal((await fetch(base+'/legal/../server.mjs')).status,404);
+});
