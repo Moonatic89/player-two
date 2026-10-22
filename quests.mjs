@@ -64,4 +64,12 @@ const hard = [
 ['Il Consiglio degli Elfi','Forma un gruppo di quattro persone di generazioni diverse e trovate una passione in comune.'],
 ['Achievement: per sempre','Con quattro invitati inventa un motto per gli sposi e una posa abbinata per una foto ricordo.']
 ];
-export const quests = [ ['easy',20,easy],['medium',40,medium],['hard',80,hard] ].flatMap(([difficulty,xp,list])=>list.map(([title,description],i)=>({id:`${difficulty}-${i+1}`,difficulty,xp,title,description})));
+// Keep the original IDs when moving five missions: existing progress remains linked.
+const extreme = [
+['Sblocca il flashback','Raccogli da quattro invitati che conoscono gli sposi in momenti diversi un ricordo a testa e raccontali come quattro capitoli della stessa saga.'],
+['Furto critico… con permesso','Organizza un piccolo scambio cosplay con tre invitati disponibili: chiedete in prestito un accessorio a testa, posate come un party alternativo e restituite tutto subito. Nessuno scambio senza consenso.'],
+['La ballata del bardo','Componi con tre invitati una breve ballata in rima sugli sposi e, in un momento adatto, cantatela insieme. Chiedete prima se è possibile, senza interrompere la festa.'],
+['Previously on: gli sposi','Con quattro invitati ricreate per una foto una scena di un anime o videogioco scelto insieme. Inventate una didascalia che racconti il matrimonio come un episodio speciale.'],
+['Diplomazia: successo critico','Riunisci un party di sei invitati di gruppi diversi, presentatevi e scegliete nome, motto e posa della vostra gilda. Scattate una foto solo se tutti sono d’accordo.']
+];
+export const quests = [ ['easy',20,easy],['medium',40,medium.slice(0,15)],['hard',80,hard] ].flatMap(([difficulty,xp,list])=>list.map(([title,description],i)=>({id:`${difficulty}-${i+1}`,difficulty,xp,title,description}))).concat(extreme.map(([title,description],i)=>({id:`medium-${i+16}`,difficulty:'extreme',xp:160,title,description})));

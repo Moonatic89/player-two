@@ -1,5 +1,6 @@
 import {test,after,before} from 'node:test';import assert from 'node:assert/strict';
 process.env.NODE_ENV='test';process.env.OWNER_TOKEN='test-owners';process.env.ACCESS_TOKEN='test-access';process.env.ADMIN_TOKEN='test-admin';process.env.SESSION_SECRET='test-secret';process.env.DEMO_MODE='true';process.env.DATA_DIR='/tmp/player2-test-'+process.pid;
+const {mkdir,writeFile}=await import('node:fs/promises');await mkdir(process.env.DATA_DIR,{recursive:true});await writeFile(process.env.DATA_DIR+'/google.json',JSON.stringify({refresh_token:'fake-test-refresh'}));
 const {server}=await import('../server.mjs');let base,cookie;
 before(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));base='http://127.0.0.1:'+server.address().port;});after(()=>server.close());
 test('Interface, assets, photos and uploads are protected',async()=>{for(const path of ['/','/app.js','/style.css','/api/photos','/api/game','/game.js','/api/photos/abc/download','/admin/connect?key=wrong','/accesso/wrong'])assert.equal((await fetch(base+path)).status,404);assert.equal((await fetch(base+'/api/upload',{method:'POST'})).status,404);});
@@ -19,7 +20,7 @@ test('Game API preserves identity, protects mutations and handles competing requ
 });
 
 test('Owners dashboard requires a separate key and never leaks secrets',async()=>{
- for(const path of ['/sposi','/sposi/app.js','/sposi/style.css','/sposi/api/players','/sposi/api/players/1','/sposi/accesso/wrong']){
+ for(const path of ['/sposi','/sposi/app.js','/sposi/style.css','/sposi/api/players','/sposi/api/players/1','/sposi/photos/evidence','/sposi/drive/connect','/sposi/accesso/wrong']){
  assert.equal((await fetch(base+path)).status,404);
  assert.equal((await fetch(base+path,{headers:{cookie}})).status,404);
  }
@@ -31,4 +32,16 @@ test('Owners dashboard requires a separate key and never leaks secrets',async()=
  assert.equal((await fetch(base+'/sposi/api/players/'+p.id+'?before=nope',{headers:{cookie:ownerCookie}})).status,400);
  assert.equal((await fetch(base+'/sposi/api/players',{headers:{cookie:'p2owners=9999999999999.forged'}})).status,404);
  assert.equal((await fetch(base+'/sposi/api/players',{method:'POST',headers:{cookie:ownerCookie}})).status,405);
+});
+
+test('Photo bonus validates Drive folder and leaves the quest active on errors',async()=>{
+ const original=globalThis.fetch;let broken=false;
+ globalThis.fetch=async(url,options)=>{const address=String(url);if(address==='https://oauth2.googleapis.com/token')return Response.json({access_token:'fake',expires_in:3600});if(address.startsWith('https://www.googleapis.com/drive/v3/files/')){if(broken)return Response.json({error:'unavailable'},{status:503});return Response.json({id:address.includes('foreign')?'foreign':'evidence',name:'Foto.jpg',mimeType:'image/jpeg',parents:address.includes('foreign')?['other-folder']:['1mpR9e_Zow1fUADXuoAeSPCeEhvppFuW7']});}return original(url,options);};
+ try{const home=await original(base,{headers:{cookie}}),identity=home.headers.get('set-cookie').split(';')[0];const headers={cookie:cookie+'; '+identity,origin:'http://localhost:3000','Content-Type':'application/json'};const post=(path,input)=>original(base+'/api/game/'+path,{method:'POST',headers,body:JSON.stringify(input)});await post('nickname',{nickname:'Foto hero'});let q=(await(await post('draw',{difficulty:'extreme'})).json()).active;
+ assert.equal((await post('finish',{attemptId:q.attemptId,action:'complete',photoId:'https://evil.example'})).status,400);
+ assert.equal((await post('finish',{attemptId:q.attemptId,action:'complete',photoId:'foreign'})).status,404);
+ broken=true;assert.equal((await post('finish',{attemptId:q.attemptId,action:'complete',photoId:'evidence'})).status,502);broken=false;
+ let j=await(await post('finish',{attemptId:q.attemptId,action:'complete',photoId:'evidence',photoTitle:'Titolo mio',bonus:999999})).json();assert.equal(j.xp,240);assert.equal(j.history[0].photoTitle,'Titolo mio');
+ q=(await(await post('draw',{difficulty:'easy'})).json()).active;assert.equal((await post('finish',{attemptId:q.attemptId,action:'complete',photoId:'evidence'})).status,409);j=await(await post('finish',{attemptId:q.attemptId,action:'complete'})).json();assert.equal(j.xp,260);
+ }finally{globalThis.fetch=original;}
 });

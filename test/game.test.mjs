@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {createGame} from '../game.mjs';
 import {quests} from '../quests.mjs';
 
-test('Catalog contains exactly 30 easy, 20 medium, 10 hard quests',()=>{
- for(const [d,n] of [['easy',30],['medium',20],['hard',10]])assert.equal(quests.filter(q=>q.difficulty===d).length,n);
+test('Catalog contains exactly 30 Novizio, 15 Avventuriero, 10 Maestro, 5 Saggio quests',()=>{
+ for(const [d,n] of [['easy',30],['medium',15],['hard',10],['extreme',5]])assert.equal(quests.filter(q=>q.difficulty===d).length,n);
  assert.equal(new Set(quests.map(q=>q.title)).size,60);
 });
 test('A profile survives network changes and nicknames do not change XP',()=>{
@@ -20,5 +20,19 @@ test('Penalties are exactly one quarter of the reward, capped at the player XP',
  const game=createGame(':memory:');try{const a=game.identify();game.nickname(a.id,'Player A');let q=game.draw(a.id,'hard').active;game.finish(a.id,q.attemptId,'abandon');assert.equal(game.state(a.id).xp,0);q=game.draw(a.id,'hard').active;game.finish(a.id,q.attemptId,'complete');for(const [d,expected]of [['easy',75],['medium',65],['hard',45]]){q=game.draw(a.id,d).active;assert.equal(game.finish(a.id,q.attemptId,'abandon').xp,expected);}}finally{game.close();}
 });
 test('Database preserves identity and quest history across restart',async()=>{
- const {mkdtemp,rm}=await import('node:fs/promises');const dir=await mkdtemp('/tmp/player2-db-');try{let game=createGame(dir+'/game.sqlite');const p=game.identify();game.nickname(p.id,'Persistente');const q=game.draw(p.id,'medium').active;game.finish(p.id,q.attemptId,'abandon');game.close();game=createGame(dir+'/game.sqlite');assert.equal(game.identify(p.token).id,p.id);assert.equal(game.state(p.id).nickname,'Persistente');assert.equal(game.state(p.id).available.medium,19);game.close();}finally{await rm(dir,{recursive:true,force:true});}
+ const {mkdtemp,rm}=await import('node:fs/promises');const dir=await mkdtemp('/tmp/player2-db-');try{let game=createGame(dir+'/game.sqlite');const p=game.identify();game.nickname(p.id,'Persistente');const q=game.draw(p.id,'medium').active;game.finish(p.id,q.attemptId,'abandon');game.close();game=createGame(dir+'/game.sqlite');assert.equal(game.identify(p.token).id,p.id);assert.equal(game.state(p.id).nickname,'Persistente');assert.equal(game.state(p.id).available.medium,14);game.close();}finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('Photo completion grants a server-calculated 50% bonus and cannot reuse evidence',()=>{
+ const g=createGame(':memory:');try{const p=g.identify();g.nickname(p.id,'Fotografo');let q=g.draw(p.id,'extreme').active;let state=g.finish(p.id,q.attemptId,'complete',{id:'image1',title:'Vittoria epica'});assert.equal(state.xp,240);assert.equal(state.history[0].photoBonus,80);assert.equal(state.history[0].photoTitle,'Vittoria epica');assert.throws(()=>g.finish(p.id,q.attemptId,'complete',{id:'image2',title:'Bis'}));q=g.draw(p.id,'easy').active;assert.throws(()=>g.finish(p.id,q.attemptId,'complete',{id:'image1',title:'Riutilizzo'}));assert.equal(g.state(p.id).active.attemptId,q.attemptId);assert.equal(g.finish(p.id,q.attemptId,'complete').xp,260);assert.equal(g.photoTitles(['image1']).image1.photoTitle,'Vittoria epica');}finally{g.close();}
+});
+test('Migration keeps exactly 60 IDs, prior scores, active reward and completion exclusions',async()=>{
+ const {DatabaseSync}=await import('node:sqlite');const {mkdtemp,rm}=await import('node:fs/promises');const dir=await mkdtemp('/tmp/player2-migration-');const path=dir+'/game.sqlite';try{
+ let g=createGame(path);const p=g.identify();g.nickname(p.id,'Vecchio profilo');g.close();let db=new DatabaseSync(path);
+ db.prepare("UPDATE quests SET difficulty='medium',xp=40 WHERE id LIKE 'medium-%'").run();
+ db.prepare("INSERT INTO attempts(player_id,quest_id,status,started_at,xp_delta) VALUES(?,'medium-16','completed',?,40)").run(p.id,Date.now());
+ db.prepare("INSERT INTO attempts(player_id,quest_id,status,started_at) VALUES(?,'medium-17','active',?)").run(p.id,Date.now());db.prepare('UPDATE players SET xp=40 WHERE id=?').run(p.id);db.close();
+ g=createGame(path);assert.equal(g.state(p.id).xp,40);assert.equal(g.state(p.id).active.xp,40);assert.equal(g.state(p.id).active.difficulty,'extreme');assert.equal(g.state(p.id).available.extreme,3);const a=g.state(p.id).active;assert.equal(g.finish(p.id,a.attemptId,'complete').xp,80);g.close();
+ db=new DatabaseSync(path);assert.equal(db.prepare('SELECT COUNT(*) AS n FROM quests').get().n,60);assert.equal(db.prepare("SELECT COUNT(*) AS n FROM quests WHERE difficulty='medium'").get().n,15);db.close();
+ }finally{await rm(dir,{recursive:true,force:true});}
 });
