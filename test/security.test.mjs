@@ -1,5 +1,5 @@
 import {test,after,before} from 'node:test';import assert from 'node:assert/strict';
-process.env.NODE_ENV='test';process.env.ACCESS_TOKEN='test-access';process.env.ADMIN_TOKEN='test-admin';process.env.SESSION_SECRET='test-secret';process.env.DEMO_MODE='true';process.env.DATA_DIR='/tmp/player2-test-'+process.pid;
+process.env.NODE_ENV='test';process.env.OWNER_TOKEN='test-owners';process.env.ACCESS_TOKEN='test-access';process.env.ADMIN_TOKEN='test-admin';process.env.SESSION_SECRET='test-secret';process.env.DEMO_MODE='true';process.env.DATA_DIR='/tmp/player2-test-'+process.pid;
 const {server}=await import('../server.mjs');let base,cookie;
 before(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));base='http://127.0.0.1:'+server.address().port;});after(()=>server.close());
 test('Interface, assets, photos and uploads are protected',async()=>{for(const path of ['/','/app.js','/style.css','/api/photos','/api/game','/game.js','/api/photos/abc/download','/admin/connect?key=wrong','/accesso/wrong'])assert.equal((await fetch(base+path)).status,404);assert.equal((await fetch(base+'/api/upload',{method:'POST'})).status,404);});
@@ -16,4 +16,19 @@ test('Game API preserves identity, protects mutations and handles competing requ
  const completed=await(await post('finish',{attemptId:state.active.attemptId,action:'complete'})).json();assert.equal(completed.xp,state.active.xp);
  assert.equal((await post('finish',{attemptId:state.active.attemptId,action:'complete'})).status,409);
  assert.equal((await fetch(base+'/api/game/nickname',{method:'POST',headers:{...headers,origin:'https://evil.example'},body:'{}'})).status,403);
+});
+
+test('Owners dashboard requires a separate key and never leaks secrets',async()=>{
+ for(const path of ['/sposi','/sposi/app.js','/sposi/style.css','/sposi/api/players','/sposi/api/players/1','/sposi/accesso/wrong']){
+ assert.equal((await fetch(base+path)).status,404);
+ assert.equal((await fetch(base+path,{headers:{cookie}})).status,404);
+ }
+ const entry=await fetch(base+'/sposi/accesso/test-owners',{redirect:'manual'});assert.equal(entry.status,303);assert.equal(entry.headers.get('location'),'/sposi');
+ const ownerCookie=entry.headers.get('set-cookie').split(';')[0];assert.match(entry.headers.get('set-cookie'),/HttpOnly/);
+ assert.equal((await fetch(base+'/sposi',{headers:{cookie:ownerCookie}})).status,200);
+ const summary=await(await fetch(base+'/sposi/api/players',{headers:{cookie:ownerCookie}})).json();assert.ok(summary.players.length);const p=summary.players.find(p=>p.nickname==='Hero test');assert.ok(p);assert.ok(p.completed===1);assert.ok(!JSON.stringify(summary).includes('token_hash'));
+ const detail=await(await fetch(base+'/sposi/api/players/'+p.id,{headers:{cookie:ownerCookie}})).json();assert.equal(detail.attempts[0].status,'completed');assert.equal(detail.player.xp,p.xp);
+ assert.equal((await fetch(base+'/sposi/api/players/'+p.id+'?before=nope',{headers:{cookie:ownerCookie}})).status,400);
+ assert.equal((await fetch(base+'/sposi/api/players',{headers:{cookie:'p2owners=9999999999999.forged'}})).status,404);
+ assert.equal((await fetch(base+'/sposi/api/players',{method:'POST',headers:{cookie:ownerCookie}})).status,405);
 });

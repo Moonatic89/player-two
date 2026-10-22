@@ -26,6 +26,22 @@ const uploads=new Map();
 export const server=http.createServer(async(req,res)=>{res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");try{
 const url=new URL(req.url,origin), path=url.pathname;
 if(path==='/health')return reply(res,200,{ok:true});
+if(path.startsWith('/sposi/accesso/')&&req.method==='GET'){
+ if(!env.OWNER_TOKEN||!equal(path.slice('/sposi/accesso/'.length),env.OWNER_TOKEN))return reply(res,404,'Non trovato','text/plain');
+ const expires=String(Date.now()+30*86400000);return redirect(res,'/sposi',cookie('p2owners',expires+'.'+sign('owners:'+expires+env.OWNER_TOKEN),30*86400));
+}
+if(path==='/sposi'||path.startsWith('/sposi/')){
+ const [expires,signature]=(cookies(req).p2owners||'').split('.');
+ if(!env.OWNER_TOKEN||Number(expires)<=Date.now()||!Number.isFinite(Number(expires))||!equal(signature,sign('owners:'+expires+env.OWNER_TOKEN)))return reply(res,404,'Non trovato','text/plain');
+ if(req.method!=='GET')return reply(res,405,'Metodo non consentito','text/plain');
+ if(path==='/sposi/api/players')return reply(res,200,game.overview());
+ const detail=path.match(/^\/sposi\/api\/players\/(\d+)$/);
+ if(detail){const id=Number(detail[1]),before=Number(url.searchParams.get('before')||Number.MAX_SAFE_INTEGER);if(!Number.isSafeInteger(id)||!Number.isSafeInteger(before)||before<1)return reply(res,400,{error:'Pagina non valida.'});return reply(res,200,game.details(id,before));}
+ const assets={'/sposi':['owners.html','text/html; charset=utf-8'],'/sposi/':['owners.html','text/html; charset=utf-8'],'/sposi/app.js':['owners.js','text/javascript; charset=utf-8'],'/sposi/style.css':['style.css','text/css; charset=utf-8']};
+ if(assets[path]){const [file,type]=assets[path];return reply(res,200,await readFile(new URL('./public/'+file,import.meta.url)),type);}
+ return reply(res,404,'Non trovato','text/plain');
+}
+
 if(path.startsWith('/accesso/')&&req.method==='GET'){if(!equal(path.slice(9),env.ACCESS_TOKEN))return reply(res,404,'Non trovato','text/plain');const exp=String(Date.now()+30*86400000);return redirect(res,'/',cookie('p2',exp+'.'+sign(exp+env.ACCESS_TOKEN),30*86400));}
 if(path==='/admin/connect'&&req.method==='GET'){
 if(!equal(url.searchParams.get('key'),env.ADMIN_TOKEN))return reply(res,404,'Non trovato','text/plain');

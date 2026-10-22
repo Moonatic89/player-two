@@ -46,3 +46,8 @@ Il cookie personale `p2player` è casuale a 256 bit, HttpOnly e Secure in HTTPS,
 Il consenso delle persone coinvolte è incluso nelle missioni. La missione del "furto" cosplay è un prestito autorizzato e restituito subito. Conferma sulla fiducia, senza verifica della foto o moderazione.
 
 Backup del gioco: usare SQLite online backup / `VACUUM INTO` verso un percorso protetto e salvare anche `google.json` separatamente. Non copiare a caldo soltanto il file `.sqlite` ignorando il WAL. Nessun backup o token deve entrare nella repository. I test creano database temporanei senza toccare quelli del server.
+
+## Cabina degli sposi
+Generare `OWNER_TOKEN` casuale (32 byte) separato dai token invitati e Google. Aprire `/sposi/accesso/OWNER_TOKEN`: crea un cookie HttpOnly dedicato di 30 giorni e reindirizza a `/sposi` senza chiave nell'indirizzo. Il link è condivisibile solo tra gli sposi; cambiarne il token revoca anche le sessioni esistenti. La pagina e tutte le sue risorse/API richiedono questo cookie, il token invitati non è sufficiente.
+
+Riepilogo con giocatori, quest attive, completate e abbandonate; browser totali distinti (non persone verificate). Elenco dei nickname per EXP con ultimo accesso, visite raggruppate in finestre di 30 minuti e quest attuale. Ricerca per nickname e diario completo di ciascun profilo, paginato a 50 tentativi. Vista in sola lettura, riepilogo aggiornato ogni 30 secondi; il diario si ricarica riaprendolo. Non espone cookie, hash o credenziali Google.
