@@ -33,7 +33,7 @@ test('Migration keeps exactly 60 IDs, prior scores, active reward and completion
  db.prepare("INSERT INTO attempts(player_id,quest_id,status,started_at,xp_delta) VALUES(?,'medium-16','completed',?,40)").run(p.id,Date.now());
  db.prepare("INSERT INTO attempts(player_id,quest_id,status,started_at) VALUES(?,'medium-17','active',?)").run(p.id,Date.now());db.prepare('UPDATE players SET xp=40 WHERE id=?').run(p.id);db.close();
  g=createGame(path);assert.equal(g.state(p.id).xp,40);assert.equal(g.state(p.id).active.xp,40);assert.equal(g.state(p.id).active.difficulty,'extreme');assert.equal(g.state(p.id).available.extreme,3);const a=g.state(p.id).active;assert.equal(g.finish(p.id,a.attemptId,'complete').xp,80);g.close();
- db=new DatabaseSync(path);assert.equal(db.prepare('SELECT COUNT(*) AS n FROM quests').get().n,60);assert.equal(db.prepare("SELECT COUNT(*) AS n FROM quests WHERE difficulty='medium'").get().n,15);db.close();
+ db=new DatabaseSync(path);assert.equal(db.prepare('SELECT COUNT(*) AS n FROM quests WHERE enabled=1').get().n,60);assert.equal(db.prepare("SELECT COUNT(*) AS n FROM quests WHERE enabled=1 AND difficulty='medium'").get().n,15);db.close();
  }finally{await rm(dir,{recursive:true,force:true});}
 });
 
@@ -45,4 +45,15 @@ test('Reset requires a matching one-use confirmation and affects only the select
 });
 test('A reset confirmation becomes stale when the guest makes progress or changes nickname',()=>{
  const g=createGame(':memory:');try{const a=g.identify();g.nickname(a.id,'Prima');let t=g.prepareReset(a.id,'owner');g.nickname(a.id,'Dopo');assert.throws(()=>g.resetProgress(a.id,t.confirmationToken,'Dopo','owner'));t=g.prepareReset(a.id,'owner');g.draw(a.id,'easy');assert.throws(()=>g.resetProgress(a.id,t.confirmationToken,'Dopo','owner'));assert.ok(g.state(a.id).active);}finally{g.close();}
+});
+
+test('Replaced quests are retired without rewriting prior attempts or adding extra playable missions',async()=>{
+ const {DatabaseSync}=await import('node:sqlite');const {mkdtemp,rm}=await import('node:fs/promises');const dir=await mkdtemp('/tmp/player2-retired-');const path=dir+'/game.sqlite';try{
+ let g=createGame(path);const p=g.identify();g.nickname(p.id,'Storico intatto');g.close();let db=new DatabaseSync(path);
+ db.prepare('INSERT INTO quests(id,difficulty,xp,title,description,enabled) VALUES(?,?,?,?,?,1)').run('easy-5','easy',20,'Messaggio dal futuro: Steins;Gate','Vecchia descrizione');
+ db.prepare("INSERT INTO attempts(player_id,quest_id,status,started_at) VALUES(?,'easy-5','active',?)").run(p.id,Date.now());db.exec('ALTER TABLE quests DROP COLUMN enabled');db.close();
+ g=createGame(path);const old=g.state(p.id).active;assert.equal(old.title,'Messaggio dal futuro: Steins;Gate');assert.equal(old.description,'Vecchia descrizione');assert.equal(old.xp,20);g.finish(p.id,old.attemptId,'complete');assert.equal(g.state(p.id).history[0].title,'Messaggio dal futuro: Steins;Gate');assert.equal(g.state(p.id).available.easy,30);
+ const seen=new Set();for(let i=0;i<30;i++){const q=g.draw(p.id,'easy').active;assert.notEqual(q.id,'easy-5');seen.add(q.id);g.finish(p.id,q.attemptId,'complete');}assert.ok(seen.has('wedding-tasse-disney'));g.close();
+ db=new DatabaseSync(path);assert.equal(db.prepare('SELECT COUNT(*) AS n FROM quests WHERE enabled=1').get().n,60);assert.equal(db.prepare("SELECT enabled FROM quests WHERE id='easy-5'").get().enabled,0);db.close();
+ }finally{await rm(dir,{recursive:true,force:true});}
 });

@@ -20,11 +20,14 @@ export function createGame(filename){
  // Snapshot rewards before recategorizing existing quests. Apply migration atomically.
  db.exec('BEGIN IMMEDIATE');
  try {
+ const questColumns=new Set(db.prepare('PRAGMA table_info(quests)').all().map(c=>c.name));
+ if(!questColumns.has('enabled'))db.exec('ALTER TABLE quests ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1');
  const columns=new Set(db.prepare('PRAGMA table_info(attempts)').all().map(c=>c.name));
  for(const [name,type]of [['reward_xp','INTEGER'],['photo_id','TEXT'],['photo_title','TEXT'],['photo_bonus','INTEGER NOT NULL DEFAULT 0']])if(!columns.has(name))db.exec(`ALTER TABLE attempts ADD COLUMN ${name} ${type}`);
  db.exec('UPDATE attempts SET reward_xp=(SELECT xp FROM quests WHERE quests.id=attempts.quest_id) WHERE reward_xp IS NULL');
  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS one_photo_bonus_per_player ON attempts(player_id,photo_id) WHERE photo_id IS NOT NULL");
- const seed=db.prepare('INSERT INTO quests(id,difficulty,xp,title,description) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET difficulty=excluded.difficulty,xp=excluded.xp,title=excluded.title,description=excluded.description');
+ db.exec('UPDATE quests SET enabled=0');
+ const seed=db.prepare('INSERT INTO quests(id,difficulty,xp,title,description,enabled) VALUES(?,?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET difficulty=excluded.difficulty,xp=excluded.xp,title=excluded.title,description=excluded.description,enabled=1');
  for(const q of quests)seed.run(q.id,q.difficulty,q.xp,q.title,q.description);
  db.exec('COMMIT');
  } catch(e){db.exec('ROLLBACK');db.close();throw e;}
@@ -35,7 +38,7 @@ export function createGame(filename){
  if(!p){fresh=randomBytes(32).toString('hex');const now=Date.now();const r=db.prepare('INSERT INTO players(token_hash,created_at,last_seen) VALUES(?,?,?)').run(hash(fresh),now,now);p=db.prepare('SELECT * FROM players WHERE id=?').get(r.lastInsertRowid);log=true;}
  if(log){const last=db.prepare('SELECT MAX(at) AS at FROM accesses WHERE player_id=?').get(p.id).at;if(!last||Date.now()-last>30*60000)db.prepare('INSERT INTO accesses(player_id,at) VALUES(?,?)').run(p.id,Date.now());db.prepare('UPDATE players SET last_seen=? WHERE id=?').run(Date.now(),p.id);}
  return {id:p.id,token:fresh};}
- function available(id,difficulty){return db.prepare(`SELECT q.* FROM quests q WHERE q.difficulty=? AND NOT EXISTS(SELECT 1 FROM attempts a WHERE a.quest_id=q.id AND a.status='active') AND NOT EXISTS(SELECT 1 FROM attempts a WHERE a.quest_id=q.id AND a.player_id=? AND a.status IN ('completed','abandoned'))`).all(difficulty,id);}
+ function available(id,difficulty){return db.prepare(`SELECT q.* FROM quests q WHERE q.enabled=1 AND q.difficulty=? AND NOT EXISTS(SELECT 1 FROM attempts a WHERE a.quest_id=q.id AND a.status='active') AND NOT EXISTS(SELECT 1 FROM attempts a WHERE a.quest_id=q.id AND a.player_id=? AND a.status IN ('completed','abandoned'))`).all(difficulty,id);}
  function state(id){expire();const p=db.prepare('SELECT nickname,xp FROM players WHERE id=?').get(id);const active=db.prepare("SELECT a.id AS attemptId,a.started_at AS startedAt,q.*,COALESCE(a.reward_xp,q.xp) AS xp FROM attempts a JOIN quests q ON q.id=a.quest_id WHERE a.player_id=? AND a.status='active'").get(id)||null;
  return {...p,level:1+Math.floor(p.xp/100),active:active?{...active,expiresAt:active.startedAt+6*3600000}:null,available:Object.fromEntries(['easy','medium','hard','extreme'].map(d=>[d,available(id,d).length])),history:db.prepare("SELECT a.id,a.status,a.xp_delta AS xpDelta,a.finished_at AS finishedAt,a.photo_id AS photoId,a.photo_title AS photoTitle,a.photo_bonus AS photoBonus,q.title,q.difficulty FROM attempts a JOIN quests q ON q.id=a.quest_id WHERE a.player_id=? AND a.status!='active' ORDER BY a.id DESC LIMIT 30").all(id)};}
  function nickname(id,name){if(typeof name!=='string')fail('Inserisci un nickname.',400);name=name.trim().normalize('NFC');if([...name].length<2||[...name].length>24||/[\p{C}]/u.test(name))fail('Il nickname deve avere da 2 a 24 caratteri, senza caratteri di controllo.',400);db.prepare('UPDATE players SET nickname=? WHERE id=?').run(name,id);return state(id);}
